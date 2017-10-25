@@ -34,7 +34,7 @@ namespace LmbrCentral
                     ->Attribute(AZ::Edit::Attributes::Category, "Physics")
                     ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/WindVolume.png")
                     ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/WindVolume.png")
-                    //->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c)) Disabled for v1.11
+                    ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))// Disabled for v1.11
                     ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
                     ->DataElement(0, &EditorWindVolumeComponent::m_configuration, "Configuration", "Configuration for wind volume.")
                     ->Attribute(AZ::Edit::Attributes::Visibility, AZ::Edit::PropertyVisibility::ShowChildrenOnly)

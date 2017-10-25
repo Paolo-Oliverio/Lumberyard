@@ -76,7 +76,7 @@ namespace LmbrCentral
                         ->Attribute(AZ::Edit::Attributes::Icon, "Editor/Icons/Components/ColliderBox.png")
                         ->Attribute(AZ::Edit::Attributes::ViewportIcon, "Editor/Icons/Components/Viewport/Box.png")
                         // Disabled for v1.11
-                        //->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
+                        ->Attribute(AZ::Edit::Attributes::AppearsInAddComponentMenu, AZ_CRC("Game", 0x232b318c))
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, false)
                     ->DataElement(0, &EditorFogVolumeComponent::m_configuration, "Settings", "Fog configuration")
                         ->Attribute(AZ::Edit::Attributes::AutoExpand, true)
@@ -168,7 +168,7 @@ namespace LmbrCentral
                     ->DataElement(AZ::Edit::UIHandlers::Slider, &FogVolumeConfiguration::m_hdrDynamic,
                         "HDR Dynamic", "Specifies how much brighter than the default 255,255,255 white the fog is")
                         ->Attribute(AZ::Edit::Attributes::ChangeNotify, &FogVolumeConfiguration::PropertyChanged)
-                        ->Attribute(AZ::Edit::Attributes::Min, 10.0f)
+                        ->Attribute(AZ::Edit::Attributes::Min, 1.0f)
                         ->Attribute(AZ::Edit::Attributes::Max, 20.0f)
                         ->Attribute(AZ::Edit::Attributes::Step, 0.01f)
 
