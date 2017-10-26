@@ -1,0 +1,870 @@
+/*
+* All or portions of this file Copyright (c) Amazon.com, Inc. or its affiliates or
+* its licensors.
+*
+* For complete copyright and license terms please see the LICENSE at the root of this
+* distribution (the "License"). All use of this software is governed by the License,
+* or, if provided, by the license below or the license accompanying this file. Do not
+* remove or modify any license notices. This file is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*
+*/
+// Original file Copyright Crytek GMBH or its affiliates, used under license.
+
+#include "IllumValidations.cfi"
+#include "Common.cfi"
+
+// Shader global descriptions
+float Script: STANDARDSGLOBAL
+<
+string Script =
+    "Public;"
+#if %DECAL
+        "Decal;"
+#endif
+#if %DEPTH_FIXUP
+        "DepthFixup;"
+#endif
+#if %VERTCOLORS
+        "VertexColors"
+#endif
+#if ENABLE_TESSELLATION
+        "HWTessellation;"
+#endif
+    "SupportsDeferredShading;"
+    "SupportsFullDeferredShading;"
+    "SupportsAttrInstancing;"
+    "ShaderDrawType = Light;"
+    "ShaderType = General;"
+    >;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////// Custom shading pass structure /////////////////////////////////////
+struct fragPassCustom
+{
+};
+
+struct fragLightPassCustom
+{
+};
+
+#if %BLENDLAYER
+    sampler2D DiffuseMap2Sampler
+    {
+        string UIName = "Second Diffuse Map";
+        string UIDescription = "Base surface color for blend layer";
+        Texture = $CustomMap;
+        sRGBLookup = true;
+    };
+
+    sampler2D SpecularMap2Sampler
+    {
+        string UIName = "Second Specular Map";
+        string UIDescription = "Reflective and shininess intensity and color of reflective highlights for blend layer";
+        Texture = $Specular2;
+        sRGBLookup = false;
+    };
+
+    sampler2D BumpMap2Sampler
+    {
+        string UIName = "Second Normal Map";
+        string UIDescription = "Normal direction for each pixel simulating bumps on the surface for blend layer. Smoothness map contained in alpha channel";
+        Texture = $CustomSecondaryMap;
+        sRGBLookup = false;
+    };
+
+    sampler2D HeightMap2Sampler
+    {
+        string UIName = "Second Height Map";
+        string UIDescription = "Height for offset bump, POM, silhouette POM, and displacement mapping defined by a Grayscale texture for blend layer";
+        Texture = $Subsurface;
+        sRGBLookup = false;
+    };
+
+    sampler2D BlendMapSampler
+    {
+        string UIName = "Blend Map";
+        string UIDescription = "Alpha mask for blend layer";
+        Texture = $Opacity;
+        sRGBLookup = false;
+    };
+
+    sampler2D smoothnessMap2Sampler
+    {
+        Texture = $SecondSmoothness;
+        sRGBLookup = false;
+    };
+#endif // %BLENDLAYER
+
+#if %DECAL
+    sampler2D DecalOpacityMapSampler
+    {
+        string UIName = "Decal Opacity Map";
+        string UIDescription = "Alpha mask used for decal entities. To use, enable the 'Decal' shader gen param.";
+        Texture = $Opacity;
+        sRGBLookup = false;
+    };
+#endif // %DECAL
+
+#if %EDGEGLOW
+    //EdgeGlowPower
+half EdgeGlowPower
+<
+    register = PER_MATERIAL_5.x;
+    string UIHelp = "Edge Glow Power";
+    string UIName = "Edge Glow Power";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 20;
+    float UIStep = 0.005;
+> = 2.0;
+
+half EdgeGlowEmission
+<
+    register = PER_MATERIAL_5.y;
+    string UIHelp = "Edge Glow Emission";
+    string UIName = "Edge Glow Emission";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 5000;
+    float UIStep = 1.0;
+> = 2.0;
+
+half4 EdgeGlowColor
+    <
+    register = PER_MATERIAL_6;	
+    string UIHelp = "Edge Glow Color";
+    string UIName = "Edge Glow Color";
+    string UIWidget = "color";
+    > = { 1.0, 1.0, 1.0, 1.0 };
+
+#endif
+
+sampler2D emittanceMapSampler
+{
+    string UIName = "Emittance";
+    string UIDescription = "Multiplies the emissive color with RGB texture. Emissive alpha mask is contained in alpha channel.";
+    Texture = $Emittance;
+};
+
+#if %OCCLUSION_MAP
+    sampler2D OcclusionMapSampler
+    {
+        string UIName = "Occlusion";
+        string UIDescription = "Grayscale texture to mask diffuse lighting response and simulate darker areas";
+        Texture = $Occlusion;
+        sRGBLookup = false;
+    };
+#endif // %OCCLUSION_MAP
+
+#include "ShadeLib.cfi"
+
+// Tweakables /////////////////
+#if %SAA_FILTERING
+half RoughnessBoost
+<
+    register = PER_MATERIAL_12.x;
+    string UIHelp = "Controls the strength of the specular antialiasing result";
+    string UIName = "SAA Roughness Boost";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 10;
+    float UIStep = 0.005;
+> = 2.0;
+
+half RoughnessMaxFootprint
+<
+    register = PER_MATERIAL_12.y;
+    string UIHelp = ""Specifies the maximum allowed area of the projected pixel footprint at any point in the scene"";
+    string UIName = "Roughness maximum footprint";
+    string UIWidget = "slider";
+    float UIMin = 0.0001;
+    float UIMax = 10.0;
+    float UIStep = 0.005;
+> = 0.3;
+#endif // %SAA_FILTERING
+
+half EmittanceMapGamma
+<
+register = PER_MATERIAL_0.x;
+string UIWidget = "slider";
+string UIName = "Emittance Map Gamma";
+string UIHelp = "Expands the lower range of the emittance map causing darker colors to appear less bright";
+float UIMin = 1.0;
+float UIMax = 2.0;
+float UIStep = 0.1;
+> = 1.0;
+
+#if %OFFSET_BUMP_MAPPING
+    half ObmDisplacement
+    <
+    register = PER_MATERIAL_0.y;
+    string UIWidget = "slider";
+    string UIName = "OBM Displacement";
+    string UIHelp = "Modifies the simulated bump depth from height map";
+    float UIMin = 0.0;
+    float UIMax = 0.025;
+    float UIStep = 0.001;
+    > = 0.004;
+#endif // %OFFSET_BUMP_MAPPING
+
+#if %FX_DISSOLVE
+    sampler2D DissolveNoiseMapSampler
+    {
+        string UIName = "Dissolve Noise Map";
+        string UIDescription = "Grayscale texture to control the dissolve effect pattern";
+        Texture = $Opacity;
+        sRGBLookup = false;
+    };
+
+    half DissolvePercentage
+    <
+    register = PER_MATERIAL_0.y;
+    string UIWidget = "slider";
+    string UIName = "Dissolve Percentage";
+    string UIHelp = "Controls the percentage of the texture being dissolved";
+    float UIMin = 0.0;
+    float UIMax = 1.0;
+    float UIStep = 0.001;
+    > = 0.0;
+
+    half DissolveEdgeThickness
+    <
+    register = PER_MATERIAL_0.z;
+    string UIWidget = "slider";
+    string UIName = "Dissolve Edge Thickness";
+    string UIHelp = "Controls the thickness of the dissolve edge";
+    float UIMin = 0.0;
+    float UIMax = 1.0;
+    float UIStep = 0.1;
+    > = 0.0;
+
+    // Dissolve color
+    float4 DissolveColor
+    <
+    register = PER_MATERIAL_3;
+    string UIHelp = "Edge color of dissolve effect";
+    string UIName = "Dissolve Color";
+    string UIWidget = "color";
+    > = {1.0, 1.0, 1.0, 1.0};
+#endif // %FX_DISSOLVE
+
+#if %PARALLAX_OCCLUSION_MAPPING
+    half PomDisplacement
+    <
+    register = PER_MATERIAL_8.x;
+    string UIWidget = "slider";
+    string UIName = "POM Displacement";
+    string UIHelp = "Modifies the parallax offset depth from height map";
+    float UIMin = 0.0;
+    float UIMax = 0.05;
+    float UIStep = 0.001;
+    > = 0.025;
+#endif // %PARALLAX_OCCLUSION_MAPPING
+
+#if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+    half SilPomDisplacement
+    <
+    register = PER_MATERIAL_0.w;
+    string UIWidget = "slider";
+    string UIName = "Silhouette POM Displacement";
+    string UIHelp = "Modifies the parallax offset depth and mesh silhouette from height map";
+    float UIMin = 0.001;
+    float UIMax = 10.0;
+    float UIStep = 0.001;
+    > = 0.025;
+
+    float SilPomNumSteps
+    <
+    register = PER_MATERIAL_1.x;
+    string UIWidget = "slider";
+    string UIName = "Silhouette POM Number of steps";
+    string UIHelp = "Number of steps taken per pixel to trace the height map from the view. More steps typically results in better precision at the cost of performance.";
+    float UIMin = 4.0;
+    float UIMax = 512.0;
+    float UIStep = 1.0;
+    > = 256.0;
+
+    float SilPomStepSizeViewDep
+    <
+    register = PER_MATERIAL_1.y;
+    string UIWidget = "slider";
+    string UIName = "Silhouette POM Step size view independence";
+    string UIHelp = "Fine tunes performance on the number of steps. Lower values distribute samples more equally.";
+    float UIMin = 1.0;
+    float UIMax = 10.0;
+    float UIStep = 0.1;
+    > = 1.0;
+#endif
+
+#if %OFFSET_BUMP_MAPPING || %PARALLAX_OCCLUSION_MAPPING || %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+    half HeightBias
+    <
+    register = PER_MATERIAL_1.z;
+    string UIWidget = "slider";
+    string UIName = "Height bias";
+    string UIHelp = "Modifies the height from the mesh faces at which the displacement is applied";
+    float UIMin = 0.0;
+    float UIMax = 1.0;
+    float UIStep = 0.05;
+    > = 1.0;
+
+    half SelfShadowStrength
+    <
+    register = PER_MATERIAL_1.w;
+    string UIWidget = "slider";
+    string UIName = "Self shadow strength";
+    string UIHelp = "Modifies self shadow strength from height map";
+    float UIMin = 0.0;
+    float UIMax = 5.0;
+    float UIStep = 0.1;
+    > = 3.0;
+#endif // %OFFSET_BUMP_MAPPING || %PARALLAX_OCCLUSION_MAPPING || %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+
+
+#if %DETAIL_MAPPING
+    half DetailBumpScale
+    <
+    register = PER_MATERIAL_2.x;
+    string UIHelp = "Modifies bump intensity from assigned detail map";
+    string UIName = "Detail bump scale";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 10.0;
+    float UIStep = 0.1;
+    > = 0.5;
+
+    half DetailDiffuseScale
+    <
+    register = PER_MATERIAL_2.y;
+    string UIHelp = "Modifies diffuse intensity from assigned detail map";
+    string UIName = "Detail diffuse scale";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 1.0;
+    float UIStep = 0.1;
+    > = 0.5;
+
+    half DetailGlossScale
+    <
+    register = PER_MATERIAL_2.z;
+    string UIHelp = "Modifies gloss intensity from assigned detail map";
+    string UIName = "Detail gloss scale";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 1.0;
+    float UIStep = 0.1;
+    > = 0.5;
+#endif // %DETAIL_MAPPING
+
+#if %BLENDLAYER
+    half BlendFactor
+    <
+    register = PER_MATERIAL_5.x;
+    string UIHelp = "Uses the blend map to control the transparent edge. Use higher values to bias toward black.";
+    string UIName = "Blend Factor";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 16.0;
+    float UIStep = 0.2;
+    > = 8.0;
+
+    half BlendLayer2Tiling
+    <
+    register = PER_MATERIAL_5.y;
+    string UIHelp = "Controls tiling of the blend layer texture inputs";
+    string UIName = "Blend Layer 2 Tiling";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 20.0;
+    float UIStep = 0.005;
+    > = 1.0;
+
+    half BlendFalloff
+    <
+    register = PER_MATERIAL_5.z;
+    string UIHelp = "Uses the blend map to control the transparent edge falloff. Use lower values for a softer falloff.";
+    string UIName = "Blend Falloff";
+    string UIWidget = "slider";
+    float UIMin = 0.1;
+    float UIMax = 128.0;
+    float UIStep = 1.0;
+    > = 32.0;
+
+    half4 BlendLayer2Diffuse
+    <
+    register = PER_MATERIAL_7;	
+    string UIHelp = "Tints the material diffuse color for the second diffuse map";
+    string UIName = "Blend Layer 2 - Diffuse (Tint)";
+    string UIWidget = "color";
+    > = { 1.0, 1.0, 1.0, 1.0 };
+
+    half4 BlendLayer2Specular
+    <
+    register = PER_MATERIAL_6;
+    string UIHelp = "Reflective and shininess intensity and color of reflective highlights for second specular map";
+    string UIName = "Blend Layer 2 - Specular";
+    string UIWidget = "color";
+    > = { 0.2314, 0.2314, 0.2314, 0.0 };
+
+    half BlendLayer2Smoothness
+    <
+    register = PER_MATERIAL_5.w;
+    string UIHelp = "Smoothness or glossiness simulating how light bounces off the surface for smoothness map contained in the alpha of the second normal map";
+    string UIName = "Blend Layer 2 - Smoothness";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 255.0;
+    float UIStep = 0.5;
+    > = 10.0;
+
+    half BlendMaskTiling
+    <
+    register = PER_MATERIAL_3.x;
+    string UIHelp = "Controls tiling of the blend mask";
+    string UIName = "Blend Mask Tiling";
+    string UIWidget = "slider";
+    float UIMin = 0.05;
+    float UIMax = 20.0;
+    float UIStep = 0.05;
+    > = 1.0;
+#endif // %BLENDLAYER
+
+
+#if !%DECAL  // Reusing register
+    half SSSIndex
+    <
+    register = PER_MATERIAL_4.x;
+    string UIHelp = "Change subsurface scattering profile and amount (0.0-0.99: marble, 1.0-1.99: skin)";
+    string UIName = "SSS Index";
+    string UIWidget = "slider";
+    float UIMin = 0.0;
+    float UIMax = 3.99;
+    float UIStep = 0.005;
+    > = 0;
+#endif
+
+#if %DECAL
+    half DecalFalloff
+    <
+    register = PER_MATERIAL_4.y;
+    string UIHelp = "Controls the transparent edge falloff of decals. Use lower values for a softer falloff.";
+    string UIName = "Decal Alpha Falloff";
+    string UIWidget = "slider";
+    float UIMin = 0.0001;
+    float UIMax = 128.0;
+    float UIStep = 1;
+    > = 1;
+
+    half DecalAlphaMult
+    <
+    register = PER_MATERIAL_4.z;
+    string UIHelp = "Controls the opacity of the decal falloff";
+    string UIName = "Decal Alpha Multiplier";
+    string UIWidget = "slider";
+    float UIMin = 0;
+    float UIMax = 10;
+    float UIStep = 0.01;
+    > = 1;
+
+    half DecalDiffuseOpacity
+    <
+    register = PER_MATERIAL_4.w;
+    string UIHelp = "Controls the opacity of the diffuse texture";
+    string UIName = "Decal Diffuse Opacity";
+    string UIWidget = "slider";
+    float UIMin = 0;
+    float UIMax = 1;
+    float UIStep = 0.01;
+    > = 1;
+#endif
+
+#if %_RT_MULTI_LAYER_ALPHA_BLEND
+#include "MultiLayerAlphaBlend.cfi"
+RasterizerOrderedStructuredBuffer<MLABPackedLayer> MultiLayerAlphaBlendBuffer : register(u5); // per-layer pixel data for alpha
+#endif
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if %FX_DISSOLVE
+half ClipDissolvedFrags(float2 uv)
+{
+    // Use the green channel of th noise map. Change this if needed.
+    half fDissolveNoise =  GetTexture2D(DissolveNoiseMapSampler, uv).g;
+
+    half dissolveThreshold = (fDissolveNoise-DissolvePercentage);
+    clip(dissolveThreshold);
+    return dissolveThreshold;
+}
+#endif
+
+//=========================================================================
+
+#include "VertexLib.cfi"
+
+//=======================================================================
+//  Lighting
+//=======================================================================
+
+///////////////// light vertex shader //////////////////
+
+#if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+    vert2GeomGeneral IlluminationVS(app2vertGeneral IN)
+#else
+    vert2FragGeneral IlluminationVS(app2vertGeneral IN)
+#endif
+{
+    vert2FragGeneral OUT = (vert2FragGeneral)0;
+    #if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+        vert2GeomGeneral OUT_ext = (vert2GeomGeneral)0;
+    #endif
+
+    streamPos vertPassPos = (streamPos)0;
+    #if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+        vs_shared_output(IN, OUT, OUT_ext, vertPassPos, true);
+    #else
+        vs_shared_output(IN, OUT, vertPassPos, true);
+    #endif
+
+    #if %DECAL && !%_TT_TEXCOORD_PROJ
+        OUT.baseTC.zw = IN.vertCommon.baseTC.xy;
+    #endif
+
+    #if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+        OUT_ext.IN = OUT;
+        return OUT_ext;
+    #else
+        return OUT;
+    #endif
+}
+
+///////////////// geometry shaders //////////////////
+
+#if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+    [maxvertexcount(9)]
+    void IlluminationGS(triangle vert2GeomGeneral In[3], inout TriangleStream<geom2FragGeneral> OutStream)
+    {
+        EmitPrismG(In[0], In[1], In[2], OutStream);
+    }
+#endif
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void frag_unify_parameters(inout fragPass pPass)
+{
+    pPass.bRenormalizeNormal = true;
+    pPass.bDeferredSpecularShading = true;
+
+    #if %OFFSET_BUMP_MAPPING || %PARALLAX_OCCLUSION_MAPPING || %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+        GetMicroDetailParams(pPass.nMicroDetailQuality, pPass.fBumpHeightScale, pPass.fHeightBias, pPass.fSelfShadowStrength);
+    #endif
+
+    #if %VERTCOLORS
+        pPass.bVertexColors = true;
+    #endif
+
+    #if %DETAIL_MAPPING
+        pPass.bDetailBumpMapping = true;
+        pPass.vDetailBumpTilling = half2(PerMaterial_DetailTiling.xy);
+        pPass.fDetailBumpScale = DetailBumpScale;
+        pPass.vDetailBlendAmount = half2(DetailDiffuseScale, DetailGlossScale);
+
+        #if %ALPHAMASK_DETAILMAP
+            pPass.bDetailBumpMappingMasking = true;
+        #endif
+    #endif
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void frag_custom_begin(inout fragPass pPass)
+{
+    float4 baseTC = pPass.IN.baseTC;
+    float4 bumpTC = pPass.IN.bumpTC;
+
+    // load the diffuse texture
+    #if %DECAL && %_RT_DECAL_TEXGEN_2D
+        #if %_TT_TEXCOORD_PROJ
+            pPass.cDiffuseMap = GetTexture2DProj(diffuseMapSampler_Decal, baseTC.xyzw);
+        #else
+            pPass.cDiffuseMap = GetTexture2D(diffuseMapSampler_Decal, baseTC.xy);
+        #endif
+    #endif
+    pPass.cDiffuseMap *= PerMaterial_DiffuseColor;	// Main layer albedo/tint color + alpha
+
+    // Specular component
+    #if %SPECULAR_MAP
+        #if !%SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+            pPass.cSpecularMap = GetTexture2D(specularMapSampler, baseTC.xy);
+        #else
+            pPass.cSpecularMap = GetTexture2DLod(specularMapSampler, float4(baseTC.xy, 0, 0)); // TODO: find way to compute lod without gradients as they cause pixel artifacts at fin / shell transition
+        #endif
+    #endif
+    pPass.cSpecularMap *= PerMaterial_SpecularColor;
+
+    pPass.fGloss *= GetTexture2D(smoothnessMapSampler, baseTC.xy).r;
+
+    // Output alpha
+    half fAlpha = pPass.cDiffuseMap.a;
+    if (pPass.bVertexColors)
+    {
+        fAlpha *= pPass.IN.Color.a;
+    }
+
+    #if %DECAL
+        #if !%_TT_TEXCOORD_PROJ
+            fAlpha *= GetTexture2D(DecalOpacityMapSampler, baseTC.zw).r;
+        #else
+            fAlpha *= GetTexture2D(DecalOpacityMapSampler, baseTC.xy).r;
+        #endif
+        fAlpha = saturate(pow(fAlpha * DecalAlphaMult, DecalFalloff));
+    #endif
+
+    #if %_RT_DECAL_TEXGEN_2D
+        fAlpha *= 100.0 / 99.0; //saturate(1 - dot(pPass.IN.DistAtten, pPass.IN.DistAtten));
+    #endif
+
+    pPass.fAlpha = fAlpha * pPass.IN.Ambient.w;
+
+    //-----------------------------------------------
+    // Second Blend Layer
+    //-----------------------------------------------
+#if %BLENDLAYER
+        #if !%SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+            half4 diffuseMap2 = GetTexture2D(DiffuseMap2Sampler, pPass.IN.blendLayerTC.xy );
+            half4 specularMap2 = GetTexture2D(SpecularMap2Sampler, pPass.IN.blendLayerTC.xy );
+            half glossLayer2 = GetTexture2D(smoothnessMap2Sampler, pPass.IN.blendLayerTC.xy ).r;
+        #else
+            float4 tiledBlendLayerTC = float4(pPass.IN.blendLayerTC, 0, 0);
+            half4 diffuseMap2 = GetTexture2DLod(DiffuseMap2Sampler, tiledBlendLayerTC);	// TODO: find way to compute lod without gradients as they cause pixel artifacts at fin / shell transition
+            half4 specularMap2 = GetTexture2DLod(SpecularMap2Sampler, tiledBlendLayerTC );
+            half glossLayer2 = GetTexture2DLod(smoothnessMap2Sampler, tiledBlendLayerTC ).r;
+        #endif
+
+        // Diffuse blend layer calculation
+        diffuseMap2.rgb *= BlendLayer2Diffuse.rgb;     // Second layer albedo/tint color is blended separately
+        pPass.cDiffuseMap = lerp(pPass.cDiffuseMap, diffuseMap2, pPass.blendFac);
+
+        // Specular blend layer calculation
+        specularMap2.rgb *= BlendLayer2Specular.rgb;    // Second layer specular is blended separately
+        pPass.cSpecularMap.rgb = lerp(pPass.cSpecularMap.rgb, specularMap2, pPass.blendFac);
+
+        // Gloss blend layer calculation
+        const half      div128 = 1.0h / 128.0h;
+        glossLayer2 *= (BlendLayer2Smoothness * div128);    // multiplying with layer 2 smoothness
+        pPass.fGloss = lerp(pPass.fGloss, glossLayer2, pPass.blendFac);
+#endif // %BLENDLAYER
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void frag_custom_per_light(inout fragPass pPass, inout fragLightPass pLight)
+{
+    pLight.fNdotL = saturate(pLight.fNdotL);
+
+    half3 cDiffuse = pLight.cDiffuse.xyz * DiffuseBRDF(pPass.vNormal.xyz, pPass.vView, pLight.vLight, pPass.fGloss, pLight.fNdotL);
+    half3 cSpecular = pLight.cSpecular.xyz * SpecularBRDF(pPass.vNormal, pPass.vView, pLight.vLight, pPass.fGloss, pPass.cSpecularMap.rgb) * pLight.fNdotL;
+
+    half3 cK = pLight.fOcclShadow * pLight.fFallOff * pLight.cFilter;
+
+    pPass.cDiffuseAcc.xyz += cDiffuse.xyz * cK.xyz;
+    pPass.cSpecularAcc.xyz += cSpecular.xyz * cK.xyz;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// remove cAmbient, store in cAmbientAcc
+void frag_custom_ambient(inout fragPass pPass, inout half3 cAmbient)
+{
+    pPass.cAmbientAcc.xyz += cAmbient.xyz;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void frag_custom_end(inout fragPass pPass, inout half3 cFinal)
+{
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include "fragLib.cfi"
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+sampler2D emissiveIntensitySampler
+{
+    string UIName = "Emittance Multiplier";
+    string UIDescription = "Multiplies the emissive color with RGB texture";
+    Texture = $DecalOverlay;
+};
+
+half3 GetEmittance(fragPass pPass)
+{
+#if %EMITTANCE_MAP
+    half4 emittanceMap = GetTexture2D(emittanceMapSampler, pPass.IN.emittanceTC);
+    half4 emissiveIntensityMap = GetTexture2D(emissiveIntensitySampler, pPass.IN.emissiveIntensityTC.xy);
+#else
+    half4 emittanceMap = half4(1.0, 1.0, 1.0, 1.0);
+    half4 emissiveIntensityMap = half4(.5, .5, .5, .5);
+#endif
+
+    // Increase the range of non-HDR textures:
+    //   AdjustLuminance(emittanceMap.rgb, pow(GetLuminance(emittanceMap.rgb), Gamma));
+    emittanceMap.rgb *= pow(max(GetLuminance(emittanceMap.rgb), 1e-6), EmittanceMapGamma - 1);
+    emittanceMap.rgb *= emissiveIntensityMap.rgb;
+
+    // DEPRECATED: Just for backwards compatibility (up to 3.8.3)
+    emittanceMap.rgb *= emittanceMap.a;
+
+    return GetMaterial_Emittance().xyz * emittanceMap.rgb;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+#if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+    EARLYDEPTHSTENCIL
+    pixout IlluminationPS(geom2FragGeneral IN_ext)
+#else
+    EARLYDEPTHSTENCIL
+    pixout IlluminationPS(vert2FragGeneral IN, float4 pixelCoord : SV_POSITION)
+#endif
+{
+    #if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+        vert2FragGeneral IN = IN_ext.IN;
+        float4 pixelCoord = IN.WPos;
+    #endif
+
+    pixout OUT = (pixout)0;
+    fragPass pPass = (fragPass) 0;
+
+    frag_unify(pPass, IN);
+
+    half4 cFinal = frag_shared_output(pPass);
+
+    half3 emittance = half3(0, 0, 0);
+    const bool bEmissive = GetLuminance(PerMaterial_EmissiveColor.xyz) > 0;
+    if (bEmissive)
+    {
+        emittance = GetEmittance(pPass);
+    }
+    #if %EDGEGLOW
+      emittance += EdgeGlowColor * pow(1 - pPass.fNdotE,EdgeGlowPower) * EdgeGlowEmission;
+    #endif
+    #if %_RT_HDR_MODE // Deferred shading used
+        if (bEmissive && pPass.IN.Ambient.w == 1)
+        {
+            // Additive glow pass
+            OUT.Color.rgb = emittance;
+
+            #if %DEPTH_FIXUP
+                OUT.Alpha.rgba = float4(1.0f, 1.0f, 1.0f, 1.0f);
+            #endif
+
+            return OUT;
+        }
+    #endif
+
+    cFinal.rgb += emittance;
+
+    #if %_RT_MULTI_LAYER_ALPHA_BLEND
+
+        if (cFinal.a < 1.0)
+        {
+            float depth = GetScreenCoords(IN.WPos).w;
+            float transmittance = 1.0f - cFinal.a;
+            cFinal.xyz *= cFinal.a;
+
+            #if %_RT_ADDITIVE_BLENDING
+                transmittance = 1.0f;
+            #endif
+
+            uint flags = 0;
+            #if %DEPTH_FIXUP
+                flags |= transmittance < 1.0f - DepthFixupThreshold ? MLAB_DO_DEPTH_FIXUP : 0;
+            #endif
+
+            MLABInsertLayer(MultiLayerAlphaBlendBuffer, cFinal.xyz, transmittance.xxx, depth, flags, PerFrame_MultiLayerAlphaBlendData.x, int2(pixelCoord.xy), int(PS_ScreenSize.x));
+        }
+        else
+        {
+            HDROutput(OUT, cFinal, 1); // @TODO: This could be problematic if there is a further away transparent sample already in the MLAB buffer.
+            DepthFixupOutput(OUT.Color, cFinal.a, IN.WPos);
+        }
+
+    #else //!(%_RT_MULTI_LAYER_ALPHA_BLEND && %_RT_ALPHABLEND)
+
+        HDROutput(OUT, cFinal, 1);
+        DepthFixupOutput(OUT.Color, cFinal.a, IN.WPos);
+
+    #endif //END %_RT_MULTI_LAYER_ALPHA_BLEND && %_RT_ALPHABLEND
+
+    return OUT;
+}
+
+#include "IllumTess.cfi"
+
+//////////////////////////////// technique ////////////////
+
+technique General
+<
+string Script =
+    "TechniqueZ=ZPass;"
+#if !%DECAL && !%SILHOUETTE_PARALLAX_OCCLUSION_MAPPING && !ENABLE_TESSELLATION
+        "TechniqueZPrepass=ZPrepass;"
+#endif
+    "TechniqueMotionBlur=MotionBlurPass;"
+    "TechniqueCustomRender=CustomRenderPass;"
+    "TechniqueShadowGen=ShadowGen;"
+    "TechniqueDebug=DebugPass;"
+    >
+{
+    pass p0
+    {
+        VertexShader = IlluminationVS() GeneralVS;
+        #if ENABLE_TESSELLATION
+            HullShader   = IllumHS() GeneralHS;
+            DomainShader = IllumDS() GeneralDS;
+        #endif
+        #if %SILHOUETTE_PARALLAX_OCCLUSION_MAPPING
+            GeometryShader = IlluminationGS() GeneralGS;
+        #endif
+        PixelShader = IlluminationPS() GeneralPS;
+
+        ZEnable = true;
+
+        #if %DECAL
+            ZWriteEnable = false;
+            ZFunc = LEqual;
+        #else
+            ZWriteEnable = true;
+        #endif
+
+        CullMode = Back;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if !%DECAL && !%SILHOUETTE_PARALLAX_OCCLUSION_MAPPING && !ENABLE_TESSELLATION
+    #include "CommonZPrePass.cfi"
+#endif
+
+#include "CommonZPass.cfi"
+#include "CommonMotionBlurPass.cfi"
+#include "CommonViewsPass.cfi"
+#include "ShadowCommon.cfi"
+#include "CommonShadowGenPass.cfi"
+#include "CommonDebugPass.cfi"
+#if PCDX11 || GL4 || GLES3 || METAL || OSXGL4
+    #include "MeshBaker.cfi"
+#endif
+
+/////////////////////// eof ///

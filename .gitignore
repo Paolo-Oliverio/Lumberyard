@@ -14,6 +14,8 @@
 !**/*.c
 !**/*.cbc
 !**/*.cfg
+!**/*.cfi
+!**/*.cfx
 !**/*.chrparams
 !**/*.cmake
 !**/*.cmd
@@ -28,6 +30,7 @@
 !**/*.ent_template
 !**/*.env
 !**/*.exportsettings
+!**/*.ext
 !**/*.filters
 !**/*.h
 !**/*.hpp
