@@ -2067,7 +2067,7 @@ inline bool CVoxelSegment::CheckCollectObjectsForVoxelization(const AABB& cloudB
     {
         for (int nObjType = 0; nObjType < eERType_TypesNum; nObjType++)
         {
-            if ((bThisIsAreaParent && nObjType == eERType_Brush) || (nObjType == eERType_Vegetation))
+            if ((bThisIsAreaParent && nObjType == eERType_Brush) ||(nObjType == eERType_StaticMeshRenderComponent)|| (nObjType == eERType_Vegetation))
             {
                 PodArray<IRenderNode*> arrRenderNodes;
 
@@ -2144,27 +2144,29 @@ inline bool CVoxelSegment::CheckCollectObjectsForVoxelization(const AABB& cloudB
                         EFileStreamingStatus eStreamingStatusParent = info.pStatObj->m_eStreamingStatus;
                         bool bUnloadable = info.pStatObj->IsUnloadable();
 
-                        info.pStatObj = (CStatObj*)info.pStatObj->GetLodObject(nLod, true);
-
-                        if (pNode->GetRenderNodeType() == eERType_Brush)
-                        {
-                            info.fObjScale = ((CBrush*)pNode)->m_fMatrixScale;
-                        }
-                        else if (pNode->GetRenderNodeType() == eERType_Vegetation)
-                        {
-                            info.fObjScale = ((CVegetation*)pNode)->GetScale();
-                        }
-                        else
-                        {
-                            assert(!"Undefined object type");
-                        }
-
-                        info.pMat = pMaterial;
-
-                        if (info.pStatObj->m_nFlags & STATIC_OBJECT_HIDDEN)
+                        info.pStatObj = (CStatObj*)info.pStatObj->GetLodObject(nLod, true);                        
+						
+						if (info.pStatObj->m_nFlags & STATIC_OBJECT_HIDDEN)
                         {
                             continue;
                         }
+
+						switch (pNode->GetRenderNodeType()) 
+						{
+						case eERType_Brush:
+							info.fObjScale = ((CBrush*)pNode)->m_fMatrixScale;
+							break;
+						case eERType_StaticMeshRenderComponent:
+							info.fObjScale = pNode->GetUniformScale();
+							break;
+						case eERType_Vegetation:
+							info.fObjScale = ((CVegetation*)pNode)->GetScale();
+							break;
+						default:
+							assert(!"Undefined object type");
+						}
+
+                        info.pMat = pMaterial;
 
                         info.bIndoor = pNode->GetEntityVisArea() != 0;
 

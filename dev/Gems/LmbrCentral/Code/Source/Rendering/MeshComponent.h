@@ -154,6 +154,10 @@ namespace LmbrCentral
         //! This function caches off the static flag stat of the transform;
         void SetTransformStaticState(bool isStatic);
 
+#if defined(FEATURE_SVO_GI)
+		EVoxelGIMode GetVoxelGIMode() { return  VM_Static; }
+#endif
+
     protected:
 
         //! Calculates base LOD distance based on mesh characteristics.
