@@ -10,16 +10,20 @@
 *
 */
 #pragma once
-
-#include "EditorBaseShapeComponent.h"
 #include "SphereShapeComponent.h"
+#include "EditorBaseShapeComponent.h"
+#include <AzCore/std/containers/array.h>
 #include <LmbrCentral/Shape/SphereShapeComponentBus.h>
+#include <AzCore/std/smart_ptr/shared_ptr.h>
+#include <AzToolsFramework/API/ToolsApplicationAPI.h>
+#include <AzToolsFramework/Manipulators/LinearManipulator.h>
 
 namespace LmbrCentral
 {   
     class EditorSphereShapeComponent
         : public EditorBaseShapeComponent
         , public SphereShape
+		, private AzToolsFramework::EntitySelectionEvents::Bus::Handler
     {
     public:
 
@@ -52,6 +56,20 @@ namespace LmbrCentral
 
         void ConfigurationChanged();
 
+		/// AzToolsFramework::EntitySelectionEvents::Bus::Handler
+		void OnSelected() override;
+		void OnDeselected() override;
+
         SphereShapeConfig m_configuration;
+
+		// Linear Manipulators
+		void RegisterManipulators();
+		void UnregisterManipulators();
+		void UpdateManipulators();
+
+		void OnMouseMoveManipulator(
+			const AzToolsFramework::LinearManipulator::Action& action, const AZ::Vector3& axis);
+
+		AZStd::unique_ptr<AzToolsFramework::LinearManipulator> m_linearManipulator;
     };
 } // namespace LmbrCentral

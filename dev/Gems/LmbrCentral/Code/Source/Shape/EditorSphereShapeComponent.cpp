@@ -64,11 +64,14 @@ namespace LmbrCentral
     void EditorSphereShapeComponent::Activate()
     {
         EditorBaseShapeComponent::Activate();
-        SphereShape::Activate(GetEntityId());        
+        SphereShape::Activate(GetEntityId());
+		EntitySelectionEvents::Bus::Handler::BusConnect(GetEntityId());
     }
 
     void EditorSphereShapeComponent::Deactivate()
     {
+		UnregisterManipulators();
+		EntitySelectionEvents::Bus::Handler::BusDisconnect();
         SphereShape::Deactivate();        
         EditorBaseShapeComponent::Deactivate();
     }
@@ -95,4 +98,81 @@ namespace LmbrCentral
             component->SetConfiguration(m_configuration);
         }
     }
+
+	void EditorSphereShapeComponent::OnSelected()
+	{
+		RegisterManipulators();
+	}
+
+	void EditorSphereShapeComponent::OnDeselected()
+	{
+		UnregisterManipulators();
+	}
+
+	void EditorSphereShapeComponent::RegisterManipulators()
+	{
+		const AzToolsFramework::ManipulatorManagerId manipulatorManagerId = AzToolsFramework::ManipulatorManagerId(1);
+
+			if (m_linearManipulator == nullptr)
+			{
+				m_linearManipulator = AZStd::make_unique<AzToolsFramework::LinearManipulator>(GetEntityId());
+				const AZ::Vector3 axis(0.0, 0.0, 1.0);
+				m_linearManipulator->SetAxis(axis);
+
+				AzToolsFramework::ManipulatorViews views;
+				views.emplace_back(AzToolsFramework::CreateManipulatorViewQuadBillboard(
+					AZ::Color(0.06275f, 0.1647f, 0.1647f, 1.0f), 0.05f));
+				m_linearManipulator->SetViews(AZStd::move(views));
+
+				m_linearManipulator->InstallMouseMoveCallback([this, axis](
+					const AzToolsFramework::LinearManipulator::Action& action)
+				{
+					OnMouseMoveManipulator(action, axis);
+				});
+			}
+
+			m_linearManipulator->Register(manipulatorManagerId);
+
+
+		UpdateManipulators();
+	}
+
+	void EditorSphereShapeComponent::UnregisterManipulators()
+	{
+
+		if (m_linearManipulator != nullptr)
+		{
+			m_linearManipulator->Unregister();
+		}
+	}
+
+	void EditorSphereShapeComponent::UpdateManipulators()
+	{
+		const float sphereRadius = m_configuration.GetRadius();
+		if (m_linearManipulator != nullptr)
+		{
+			m_linearManipulator->SetPosition(AZ::Vector3(0.0, 0.0, sphereRadius));
+			m_linearManipulator->SetBoundsDirty();
+		}
+				
+	}
+
+	void EditorSphereShapeComponent::OnMouseMoveManipulator(
+		const AzToolsFramework::LinearManipulator::Action& action, const AZ::Vector3& axis)
+	{
+		// calculate the amount of displacement along an axis this manipulator has moved
+		// clamp movement so it cannot go negative based on axis direction
+		UpdateManipulators();
+		const AZ::VectorFloat newradius(action.LocalPosition().GetZ().GetMax(AZ::VectorFloat::CreateZero()));
+		SetRadius(newradius);
+
+		m_linearManipulator->SetPosition(AZ::Vector3(0.0, 0.0, newradius));
+		m_linearManipulator->SetBoundsDirty();
+
+		// ensure property grid values are refreshed
+		AzToolsFramework::ToolsApplicationNotificationBus::Broadcast(
+			&AzToolsFramework::ToolsApplicationNotificationBus::Events::InvalidatePropertyDisplay, AzToolsFramework::Refresh_Values);
+	}
+
+
 } // namespace LmbrCentral
